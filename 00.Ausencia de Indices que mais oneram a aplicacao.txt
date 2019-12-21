@@ -1,0 +1,106 @@
+-- COM TODOS OS ATRIBUTOS (ATENCAO: A ORDEM DO ATRIBUTO NÃO ESTÁ DEFINIDA. VEJA SELETIVIDADE DOS ATRIBUTOS ANTES DE DEFINIR QUAL A ORDEM CORRETA)
+
+USE MASTER;
+--A QUANTO TEMPO A INSTANCIA ESTA ON LINE
+SELECT  DATEDIFF(DAY, sd.crdate, GETDATE()) AS days_history
+FROM    sys.sysdatabases sd
+WHERE   sd.[name] = 'tempdb' 
+GO
+
+USE BD;
+
+
+SELECT  TOP 20 
+        [Total Cost]  = ROUND(avg_total_user_cost * avg_user_impact * (user_seeks + user_scans),0) 
+        , avg_user_impact
+	, p.rows
+        , TableName = statement
+        , [IndexColumns] = equality_columns 
+        , [InequalityUsage] = inequality_columns
+        , [Include Cloumns] = included_columns
+FROM        sys.dm_db_missing_index_groups g 
+INNER JOIN    sys.dm_db_missing_index_group_stats s 
+       ON s.group_handle = g.index_group_handle 
+INNER JOIN    sys.dm_db_missing_index_details d 
+       ON d.index_handle = g.index_handle
+LEFT OUTER JOIN sys.partitions p 
+       ON d.object_id = p.object_id
+WHERE d.database_id = (SELECT DB_ID())
+ORDER BY [Total Cost] DESC;
+
+--Atenção rows acima só é legal se a tabela não está particionada - caso esteja é necessário fazer um sum vide: http://blog.sqlauthority.com/2010/09/08/sql-server-find-row-count-in-table-find-largest-table-in-database-part-2/
+
+
+-- A query abaixo tira as repetições (melhor para avaliar)
+
+SELECT  distinct TOP 20 
+        [Total Cost]  = ROUND(avg_total_user_cost * avg_user_impact * (user_seeks + user_scans),0) 
+        , avg_user_impact
+	, p.rows
+        , TableName = statement
+        , [IndexColumns] = equality_columns 
+        , [InequalityUsage] = inequality_columns
+        , [Include Cloumns] = included_columns
+FROM        sys.dm_db_missing_index_groups g 
+INNER JOIN    sys.dm_db_missing_index_group_stats s 
+       ON s.group_handle = g.index_group_handle 
+INNER JOIN    sys.dm_db_missing_index_details d 
+       ON d.index_handle = g.index_handle
+LEFT OUTER JOIN sys.partitions p 
+       ON d.object_id = p.object_id
+WHERE d.database_id = (SELECT DB_ID())
+ORDER BY [Total Cost] DESC;
+
+
+
+-- MAIS SIMPLES (SÓ COM AS TABELAS E ATRIBUTOS A SEREM INDEXADOS)
+
+USE DB_EPC_PRD
+
+SELECT  TOP 10 
+        [Total Cost]  = ROUND(avg_total_user_cost * avg_user_impact * (user_seeks + user_scans),0) 
+        , TableName = statement
+	, p.rows
+        , [IndexColumns] = equality_columns 
+        , [InequalityUsage] = inequality_columns
+FROM        sys.dm_db_missing_index_groups g 
+INNER JOIN    sys.dm_db_missing_index_group_stats s 
+       ON s.group_handle = g.index_group_handle 
+INNER JOIN    sys.dm_db_missing_index_details d 
+       ON d.index_handle = g.index_handle
+LEFT OUTER JOIN sys.partitions p 
+       ON d.object_id = p.object_id
+WHERE d.database_id = (SELECT DB_ID())
+ORDER BY [Total Cost] DESC;
+
+
+-- BANCOS DE DADOS QUE MAIS SOFREM COM A AUSENCIA DE INDICES.
+
+SELECT 
+    DatabaseName = DB_NAME(database_id)
+    ,[Number Indexes Missing] = count(*) 
+FROM sys.dm_db_missing_index_details
+GROUP BY DB_NAME(database_id)
+ORDER BY 2 DESC;
+
+
+
+-- MONTA O CREATE INDEX (tem que tratar depois eliminando caracteres):
+
+SELECT  top 100
+        [Total Cost]  = ROUND(avg_total_user_cost * avg_user_impact * (user_seeks + user_scans),0) 
+        , avg_user_impact
+        , TableName = statement
+        , [EqualityUsage] = equality_columns 
+        , [InequalityUsage] = inequality_columns
+		, 'CREATE INDEX IX_' + statement + '_' + equality_columns + ' ON ' +  statement + '(' + equality_columns + ');'
+FROM        sys.dm_db_missing_index_groups g 
+INNER JOIN    sys.dm_db_missing_index_group_stats s 
+       ON s.group_handle = g.index_group_handle 
+INNER JOIN    sys.dm_db_missing_index_details d 
+       ON d.index_handle = g.index_handle
+WHERE d.database_id = (SELECT DB_ID()) AND equality_columns IS NOT NULL AND inequality_columns IS NULL
+ORDER BY [Total Cost] DESC;
+
+
+
